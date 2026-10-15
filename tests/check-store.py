@@ -196,6 +196,6 @@ with tempfile.TemporaryDirectory(prefix='string-notes-test-') as folder:
     (path / 'main.swift').write_text(checks)
     app_source = (root / 'Sources/main.swift').read_text()
     session_source = app_source[app_source.index('final class EditSession:'):app_source.index('final class NoteHostingView')]
-    (path / 'EditSession.swift').write_text('import Foundation\nimport Combine\n' + session_source)
+    (path / 'EditSession.swift').write_text('import Foundation\nimport Combine\nimport Cocoa\nclass NoteTextView: NSTextView {}\n' + session_source)
     subprocess.run(['xcrun','swiftc','-module-cache-path','/tmp/string-notes-module-cache',str(root/'Sources/Localization.swift'),str(root/'Sources/Store.swift'),str(root/'Sources/NoteDocument.swift'),str(root/'Sources/Markdown.swift'),str(path/'EditSession.swift'),str(path/'main.swift'),'-o',str(path/'test')],check=True)
     subprocess.run([str(path/'test'),str(path/'data')],check=True)

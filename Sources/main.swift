@@ -94,6 +94,13 @@ struct MemoCard: View {
                     .background(LinearGradient(colors: [papers[max(0,min(3,note.color))], papers[max(0,min(3,note.color))].opacity(0.96)], startPoint: .top, endPoint: .bottom))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.45), lineWidth: 0.6))
+                    .overlay(alignment: .topTrailing) {
+                        if let progress = MarkdownStyle.taskProgress(note.text) {
+                            Text("\(progress.done)/\(progress.total)").font(.system(size: 10, weight: .medium)).foregroundStyle(.black.opacity(0.45))
+                                .padding(.horizontal, 5).padding(.vertical, 1.5).background(.black.opacity(0.07), in: Capsule())
+                                .padding(6)
+                        }
+                    }
                     .shadow(color: .black.opacity(hover ? 0.23 : 0.16), radius: hover ? 10 : 6, x: 1, y: hover ? 7 : 4)
             }.buttonStyle(TactileButtonStyle()).help(L("点击编辑便笺")).accessibilityHidden(true)
         }.overlay { CardDragSurface(title: NoteDocument.preview(note), hovered: { hover = $0 }, clicked: edit, moved: drag, dropped: drop) }.recordsHitRect()
@@ -246,6 +253,75 @@ final class NoteTextView: ResizableImageTextView {
         if NSPasteboard.general.availableType(from: [.rtfd]) != nil { super.paste(sender) }
         else { pasteAsPlainText(sender) }
     }
+    // Clicking a task checkbox toggles it in the source text; everything else stays native.
+    override func mouseDown(with event: NSEvent) {
+        if markdownEnabled, !hasMarkedText(), toggleTask(at: convert(event.locationInWindow, from: nil)) { return }
+        super.mouseDown(with: event)
+    }
+    private func toggleTask(at point: NSPoint) -> Bool {
+        guard let storage = textStorage, let container = textContainer, let layout = layoutManager else { return false }
+        let index = layout.characterIndex(for: point, in: container, fractionOfDistanceBetweenInsertionPoints: nil)
+        guard let marker = MarkdownStyle.taskMarker(at: index, in: storage.string) else { return false }
+        layout.ensureLayout(for: container)
+        let glyphs = layout.glyphRange(forCharacterRange: marker, actualCharacterRange: nil)
+        var rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        rect.origin.x += textContainerOrigin.x; rect.origin.y += textContainerOrigin.y
+        // Glyph mapping snaps to the nearest character, so the click must land on the marker itself.
+        guard rect.insetBy(dx: -6, dy: -4).contains(point),
+              let value = MarkdownStyle.toggledMarker((storage.string as NSString).substring(with: NSRange(location: marker.location + 1, length: 1)).first ?? " ") else { return false }
+        insertText(String(value), replacementRange: NSRange(location: marker.location + 1, length: 1))
+        undoManager?.setActionName(L("切换任务"))
+        return true
+    }
+    func insertTaskItem() {
+        let text = string as NSString
+        let caret = min(selectedRange().location, text.length)
+        let line = text.lineRange(for: NSRange(location: caret, length: 0))
+        let before = text.substring(with: NSRange(location: line.location, length: caret - line.location))
+        insertText((before.trimmingCharacters(in: .whitespaces).isEmpty ? "" : "\n") + "- [ ] ", replacementRange: selectedRange())
+    }
+    var capturingScreenshot = false
+    @objc func captureScreenshot(_ sender: Any?) {
+        guard !capturingScreenshot, let window = window else { return }
+        if !CGPreflightScreenCaptureAccess() {
+            CGRequestScreenCaptureAccess()
+            let alert = NSAlert()
+            alert.messageText = L("截图需要屏幕录制权限")
+            alert.informativeText = L("截图需要屏幕录制权限。请在「系统设置 › 隐私与安全性 › 屏幕录制」中授权，然后重试。")
+            alert.addButton(withTitle: L("打开系统设置"))
+            alert.addButton(withTitle: L("取消"))
+            alert.beginSheetModal(for: window) { response in
+                if response == .alertFirstButtonReturn,
+                   let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(url) }
+            }
+            return
+        }
+        capturingScreenshot = true
+        let saved = selectedRange()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("snshot-" + UUID().uuidString + ".png")
+        window.orderOut(nil)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = ["-i", "-x", url.path]
+        process.terminationHandler = { [weak self] task in
+            let image = task.terminationStatus == 0 ? NSImage(contentsOf: url) : nil
+            DispatchQueue.main.async {
+                try? FileManager.default.removeItem(at: url)
+                guard let self = self else { return }
+                self.capturingScreenshot = false
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeFirstResponder(self)
+                self.setSelectedRange(saved)
+                if let image = image { self.insertPicture(image) }
+            }
+        }
+        do { try process.run() } catch {
+            capturingScreenshot = false
+            window.makeKeyAndOrderFront(nil)
+            NSSound.beep()
+        }
+    }
     func insertPicture(_ image: NSImage) {
         guard let value = NoteDocument.image(image, width: NotePreferences.imageWidth(available: (textContainer?.containerSize.width ?? 320) - 12)) else { NSSound.beep(); return }
         let range = selectedRange()
@@ -265,7 +341,10 @@ final class NoteTextView: ResizableImageTextView {
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event) ?? NSMenu()
         let item = NSMenuItem(title: L("插入图片…"), action: #selector(insertImage(_:)), keyEquivalent: "")
-        item.target = self; menu.addItem(.separator()); menu.addItem(item); return menu
+        item.target = self
+        let shot = NSMenuItem(title: L("截图插入…"), action: #selector(captureScreenshot(_:)), keyEquivalent: "")
+        shot.target = self
+        menu.addItem(.separator()); menu.addItem(item); menu.addItem(shot); return menu
     }
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -308,6 +387,7 @@ struct PaperTextEditor: NSViewRepresentable {
         view.textContainer?.containerSize = NSSize(width: 350, height: CGFloat.greatestFiniteMagnitude)
         view.textStorage?.setAttributedString(NoteDocument.decode(session.note))
         if let storage = view.textStorage { NoteDocument.fitImages(storage, width: 350) }
+        session.textView = view
         view.delegate = context.coordinator; scroll.documentView = view
         return scroll
     }
@@ -330,6 +410,7 @@ struct PaperTextEditor: NSViewRepresentable {
 final class EditSession: ObservableObject {
     @Published var note: Memo
     @Published var status = L("已保存")
+    weak var textView: NoteTextView?
     var encodingFailed = false
     private var pending: DispatchWorkItem?
     init(_ note: Memo) { self.note = note; if note.text.isEmpty { status = L("输入后自动保存") } }
@@ -377,6 +458,12 @@ struct Editor: View {
                     Spacer()
                 }.frame(maxWidth: .infinity, minHeight: 44)
                     .overlay { NoteWindowDragSurface() }.help(L("拖动窗口；拖回绳子可挂起"))
+                Button { session.textView?.insertTaskItem() } label: {
+                    NoteToolbarIcon(name: "checklist")
+                }.help(L("插入任务列表项")).accessibilityLabel(L("插入任务列表项"))
+                Button { session.textView?.captureScreenshot(nil) } label: {
+                    NoteToolbarIcon(name: "camera.viewfinder")
+                }.help(L("截图插入…")).accessibilityLabel(L("截图插入…"))
                 Button { let value = !(session.note.staysOnTop ?? false); session.note.staysOnTop = value; pin(value) } label: {
                     NoteToolbarIcon(name: session.note.staysOnTop == true ? "pin.fill" : "pin")
                 }.help(L("保持窗口最前")).accessibilityLabel(session.note.staysOnTop == true ? L("取消窗口置顶") : L("保持窗口最前"))

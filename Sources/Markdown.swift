@@ -53,6 +53,10 @@ enum MarkdownStyle {
             if matches(#"^[ \t]*(?:[-+*]|\d+\.)[ \t]+"#, in: line).first != nil {
                 let paragraph = NSMutableParagraphStyle(); paragraph.headIndent = font.pointSize * 1.4
                 storage.addAttribute(.paragraphStyle, value: paragraph, range: line)
+                // The checkbox stays full-size and tinted on every line so it reads as clickable.
+                if let m = matches(#"^[ \t]*[-+*][ \t]+(\[[ xX]\])"#, in: line).first {
+                    storage.addAttribute(.foregroundColor, value: NSColor.black.withAlphaComponent(0.45), range: m.range(at: 1))
+                }
                 if let m = matches(#"^[ \t]*[-+*] \[[xX]\] (.*)$"#, in: line).first {
                     storage.addAttributes([.strikethroughStyle: NSUnderlineStyle.single.rawValue, .foregroundColor: NSColor.black.withAlphaComponent(0.45)], range: m.range(at: 1))
                 }
@@ -133,5 +137,36 @@ enum MarkdownStyle {
         if !group(5).isEmpty { guard let n = Int(group(5)), n < Int.max else { return nil }; prefix = group(1) + "\(n + 1). " }
         else { prefix = group(1) + group(2) + " " + (m.range(at: 4).location == NSNotFound ? "" : "[ ] ") }
         return (prefix, group(7).trimmingCharacters(in: .whitespaces).isEmpty)
+    }
+    // Interactive task checkboxes: the marker range containing the caret, or nil.
+    // Bullets only (matching the strikethrough scope) and never inside fenced code.
+    static func taskMarker(at caret: Int, in source: String) -> NSRange? {
+        let text = source as NSString
+        guard caret >= 0, caret <= text.length, codeBlock(at: caret, in: source) == nil else { return nil }
+        let line = text.lineRange(for: NSRange(location: caret, length: 0))
+        guard let m = (try? NSRegularExpression(pattern: #"^[ \t]*[-+*][ \t]+(\[[ xX]\])"#))?
+            .firstMatch(in: source, range: line) else { return nil }
+        return m.range(at: 1)
+    }
+    static func toggledMarker(_ marker: Character) -> Character? {
+        switch marker {
+        case " ": return "x"
+        case "x", "X": return " "
+        default: return nil
+        }
+    }
+    static func taskProgress(_ source: String) -> (done: Int, total: Int)? {
+        let text = source as NSString
+        let protected = fencedBlocks(source).map(\.range)
+        var done = 0, total = 0, offset = 0
+        let pattern = try? NSRegularExpression(pattern: #"^[ \t]*[-+*][ \t]+\[([ xX])\]"#)
+        while offset < text.length {
+            let line = text.lineRange(for: NSRange(location: offset, length: 0)); offset = NSMaxRange(line)
+            guard !protected.contains(where: { $0.location <= line.location && NSMaxRange($0) >= NSMaxRange(line) }),
+                  let m = pattern?.firstMatch(in: source, range: line) else { continue }
+            total += 1
+            if text.substring(with: m.range(at: 1)) != " " { done += 1 }
+        }
+        return total == 0 ? nil : (done, total)
     }
 }
