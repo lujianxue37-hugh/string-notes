@@ -134,6 +134,13 @@ final class Store: ObservableObject {
         next.notes.insert(item.note, at: min(item.index, next.notes.count))
         let ok = commit(next); if ok { message = L("便笺已找回") }; return ok
     }
+    // Irreversible clean slate: rope, archive, drafts, and trash are emptied together.
+    @discardableResult func deleteAll() -> Bool {
+        var next = book
+        guard !next.notes.isEmpty || !next.drafts.isEmpty || !next.trash.isEmpty else { return false }
+        next.notes = []; next.drafts = []; next.trash = []; next.ropePositions = nil
+        let ok = commit(next); if ok { previousOrder = nil; previousPositions = nil; message = L("已删除全部便签") }; return ok
+    }
     @discardableResult func place(_ id: UUID, before target: UUID?, positions: [String: Double]? = nil) -> Bool {
         guard target != id else { return true }
         var next = book

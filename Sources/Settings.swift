@@ -15,6 +15,9 @@ enum NotePreferences {
         UserDefaults.standard.string(forKey: "imageSizing") == "fit" ? available : min(available, 320)
     }
 }
+extension Notification.Name {
+    static let deleteAllNotes = Notification.Name("StringNotes.deleteAllNotes")
+}
 private enum SettingsPage: String, CaseIterable, Identifiable {
     case general, notes, shortcuts, data
     var title: String { switch self { case .general: return L("通用"); case .notes: return L("便笺"); case .shortcuts: return L("快捷键"); case .data: return L("数据与关于") } }
@@ -59,6 +62,7 @@ struct SettingsView: View {
     @SettingStorage("markdownEnabled") private var markdownEnabled = true
     @SettingStorage("imageSizing") private var imageSizing = "fixed"
     @State private var result = ""
+    @State private var confirmingDeleteAll = false
     @SettingStorage("appLanguage") private var appLanguage = "system"
     @SettingStorage("SUEnableAutomaticChecks") private var automaticUpdateChecks = true
     @ObservedObject private var updates = UpdateChecker.shared
@@ -96,6 +100,12 @@ struct SettingsView: View {
                 }.padding(28).frame(maxWidth: .infinity, alignment: .leading)
             }.background(Color(nsColor: .underPageBackgroundColor))
         }.frame(minWidth: 680, minHeight: 500)
+            .alert(L("删除全部便签？"), isPresented: $confirmingDeleteAll) {
+                Button(L("删除全部"), role: .destructive) { NotificationCenter.default.post(name: .deleteAllNotes, object: nil) }
+                Button(L("取消"), role: .cancel) {}
+            } message: {
+                Text(L("将永久删除绳上、归档和回收站中的全部便签，此操作无法撤销。建议先在上方导出完整备份。"))
+            }
     }
     private var general: some View {
         VStack(spacing: 22) {
@@ -192,6 +202,8 @@ struct SettingsView: View {
                 SettingRow(title: L("从备份恢复")) { Button(L("导入…"), action: importBackup) }
                 Divider().padding(.leading, 14)
                 SettingRow(title: L("存储位置")) { Button(L("在访达中打开")) { NSWorkspace.shared.open(store.file.deletingLastPathComponent()) } }
+                Divider().padding(.leading, 14)
+                SettingRow(title: L("删除全部便签")) { Button(L("删除…"), role: .destructive) { confirmingDeleteAll = true } }
             }
             if !result.isEmpty { Text(result).font(.system(size: 12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
             UpdateSettings(updates: updates, automaticChecks: $automaticUpdateChecks)

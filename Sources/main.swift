@@ -508,6 +508,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var lastAutoHide = UserDefaults.standard.object(forKey: "ropeAutoHide") as? Bool ?? true
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(self, selector: #selector(handleWindowDrag(_:)), name: .noteWindowDrag, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(deleteAllNotes), name: .deleteAllNotes, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(screenConfigurationChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(ropePreferencesChanged), name: UserDefaults.didChangeNotification, object: nil)
         NSApp.setActivationPolicy(.accessory)
@@ -580,6 +581,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else if presentation.revealed { tuck() } else { show() }
     }
     @objc func newNote() { show(); openEditor(nil) }
+    // Deleting everything also discards open editors without flushing them back.
+    @objc func deleteAllNotes() {
+        guard store.deleteAll() else { return }
+        let closing = editors
+        editors.removeAll()
+        for entry in closing.values { entry.session.cancelPending(); entry.window.close() }
+        presentation.detached.removeAll()
+        library?.close()
+        show()
+    }
     @objc func undoSort() { store.undoOrder() }
     func scheduleTracking() {
         timer?.invalidate()

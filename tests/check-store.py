@@ -188,6 +188,15 @@ sessionB.note.text = "B still editable"
 check(sessionB.flush(windowStore) && windowStore.notes.count == 2, "closing one session leaves other editable")
 check(windowStore.delete(sessionA.note.id) && sessionB.flush(windowStore) && windowStore.notes.count == 1 && windowStore.notes[0].id == sessionB.note.id, "deleting one session preserves other note")
 
+let wipe = Store(folder: root.appendingPathComponent("wipe"), seedWelcome: false)
+_ = wipe.put(a)
+_ = wipe.put(b)
+_ = wipe.draft(Memo(text: "pending draft"))
+_ = wipe.delete(b.id)
+check(wipe.deleteAll() && wipe.notes.isEmpty && wipe.drafts.isEmpty && wipe.book.trash.isEmpty, "delete all wipes rope, drafts and trash")
+check(Store(folder: root.appendingPathComponent("wipe"), seedWelcome: false).notes.isEmpty && Store(folder: root.appendingPathComponent("wipe"), seedWelcome: false).book.trash.isEmpty, "delete all survives restart")
+check(!wipe.deleteAll(), "delete all on an empty store is a no-op")
+
 '''
 # Throwing reads are evaluated before the nonthrowing check autoclosure.
 checks = checks.replace('check(try Data(contentsOf: legacy.appendingPathComponent("notes-before-v3.json")) == old,', 'let backup = try Data(contentsOf: legacy.appendingPathComponent("notes-before-v3.json")); check(backup == old,').replace('check(try Data(contentsOf: bad.file) == invalid,', 'let corruptAfter = try Data(contentsOf: bad.file); check(corruptAfter == invalid,')
