@@ -8,7 +8,7 @@ termination=source[source.index('    func applicationShouldTerminate('):source.i
 termination=termination.replace('alert.runModal()', '_ = alert.messageText')
 with tempfile.TemporaryDirectory(prefix='string-notes-update-save-') as folder:
  path=Path(folder)
- (path/'Session.swift').write_text('import Foundation\nimport Combine\n'+session)
+ (path/'Session.swift').write_text('import Foundation\nimport Combine\nimport Cocoa\nclass NoteTextView: NSTextView {}\n'+session)
  (path/'main.swift').write_text('''import Cocoa
 func check(_ result: Bool, _ name: String) { precondition(result, name); print("PASS: " + name) }
 final class Delegate {
